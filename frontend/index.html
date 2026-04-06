@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Saif Chat LLM - AI Assistant</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <style>
+    /* Markdown-style formatting */
+    .message-content {
+      line-height: 1.6;
+    }
+    .message-content strong {
+      font-weight: bold;
+      color: #fff;
+    }
+    .message-content em {
+      font-style: italic;
+      color: #d1d5db;
+    }
+    .message-content code {
+      background: #1f2937;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 0.9em;
+    }
+    .message-content pre {
+      background: #1f2937;
+      padding: 10px;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin: 10px 0;
+    }
+    .message-content ul, .message-content ol {
+      margin: 8px 0;
+      padding-left: 20px;
+    }
+    .message-content a {
+      color: #60a5fa;
+      text-decoration: underline;
+    }
+    /* Scrollbar styling */
+    #chart-container::-webkit-scrollbar {
+      width: 8px;
+    }
+    #chart-container::-webkit-scrollbar-track {
+      background: #262626;
+      border-radius: 4px;
+    }
+    #chart-container::-webkit-scrollbar-thumb {
+      background: #525252;
+      border-radius: 4px;
+    }
+    #chart-container::-webkit-scrollbar-thumb:hover {
+      background: #737373;
+    }
+  </style>
+</head>
+<body class="bg-neutral-900 text-white flex">
+
+  <!-- Left Sidebar -->
+
+
+  <!-- Main Chat Area -->
+  <div class="flex-1 p-3 overflow-x-hidden relative">
+    
+    <!-- Messages Container -->
+    <div class="max-w-3xl mx-auto pb-40" id="chat-container">
+      <div id="messages"></div>
+    </div>
+
+    <!-- Bottom Input -->
+    <div class="fixed inset-x-0 bottom-0 flex items-center bg-neutral-900 justify-center">
+      <div class="bg-neutral-800 p-2 rounded-3xl w-full max-w-3xl mb-3">
+        <textarea 
+          class="w-full resize-none outline-none p-3 rounded-xl bg-neutral-700 text-white placeholder-gray-400" 
+          rows="2" 
+          id="input"
+          placeholder="Type your message... Use **bold**, *italic*, or `code`"
+          style="background-color: #404040;">
+        </textarea>
+        <div class="flex items-center justify-between mt-2 px-2">
+          <div class="text-xs text-gray-400">
+            Press Enter to send, Shift+Enter for new line
+          </div>
+          <button 
+            class="bg-white px-6 py-1.5 text-black rounded-full cursor-pointer hover:bg-gray-300 transition-colors font-medium" 
+            id="sendBtn">
+            Send
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const input = document.querySelector('#input');
+    const messagesContainer = document.querySelector('#messages');
+    const sendBtn = document.querySelector('#sendBtn');
+    let threadId = localStorage.getItem('threadId') || 'thread_' + Date.now();
+
+    // Save thread ID
+    localStorage.setItem('threadId', threadId);
+
+    // Format text with markdown-like syntax
+    function formatText(text) {
+      let formatted = text;
+      
+      // Escape HTML
+      formatted = formatted.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+      });
+      
+      // Code blocks ```code```
+      formatted = formatted.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>');
+      
+      // Inline code `code`
+      formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>');
+      
+      // Bold **text** or __text__
+      formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      formatted = formatted.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+      
+      // Italic *text* or _text_
+      formatted = formatted.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+      formatted = formatted.replace(/_([^_]+)_/g, '<em>$1</em>');
+      
+      // Links [text](url)
+      formatted = formatted.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+      
+      // Line breaks
+      formatted = formatted.replace(/\n/g, '<br>');
+      
+      return formatted;
+    }
+
+    // Create loading indicator
+    function createLoading() {
+      const loadingDiv = document.createElement('div');
+      loadingDiv.className = 'my-6 flex justify-start';
+      loadingDiv.innerHTML = `
+        <div class="bg-gray-800 p-3 rounded-xl max-w-fit">
+          <div class="flex items-center gap-2">
+            <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0s"></div>
+            <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
+            <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.4s"></div>
+          </div>
+        </div>
+      `;
+      return loadingDiv;
+    }
+
+    // Add message to chat
+    function addMessage(text, isUser) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `my-6 ${isUser ? 'flex justify-end' : 'flex justify-start'}`;
+      
+      if (isUser) {
+        messageDiv.innerHTML = `
+          <div class="bg-neutral-800 p-3 rounded-xl max-w-[80%]">
+            <div class="message-content">${formatText(text)}</div>
+          </div>
+        `;
+      } else {
+        messageDiv.innerHTML = `
+          <div class="bg-gray-800 p-3 rounded-xl max-w-[80%]">
+            <div class="message-content">${formatText(text)}</div>
+          </div>
+        `;
+      }
+      
+      messagesContainer.appendChild(messageDiv);
+      scrollToBottom();
+    }
+
+    // Scroll to bottom
+    function scrollToBottom() {
+      const container = document.getElementById('chat-container');
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // Generate message
+    async function generate(text) {
+      // Add user message
+      addMessage(text, true);
+      
+      // Clear input
+      input.value = '';
+      
+      // Add loading indicator
+      const loading = createLoading();
+      messagesContainer.appendChild(loading);
+      scrollToBottom();
+
+      try {
+        const assistantMessage = await callServer(text);
+        
+        // Remove loading and add bot message
+        loading.remove();
+        addMessage(assistantMessage, false);
+        
+      } catch (error) {
+        console.error("Error:", error);
+        loading.remove();
+        
+        // Add error message
+        const errorMsg = document.createElement('div');
+        errorMsg.className = 'my-6 flex justify-start';
+        errorMsg.innerHTML = `
+          <div class="bg-red-600 p-3 rounded-xl max-w-[80%]">
+            <div class="message-content">❌ Error: ${error.message || 'Something went wrong. Please try again.'}</div>
+          </div>
+        `;
+        messagesContainer.appendChild(errorMsg);
+        scrollToBottom();
+      }
+    }
+
+    // API call
+    async function callServer(inputText) {
+      const response = await fetch('http://localhost:3001/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: inputText,
+          threadId: threadId
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      return result.message || result.response || "No response from server";
+    }
+
+    // Send message
+    async function sendMessage() {
+      const text = input?.value.trim();
+      if (!text) return;
+      
+      await generate(text);
+    }
+
+    // Handle Enter key
+    function handleEnter(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    }
+
+    // New chat function
+    function newChat() {
+      if (confirm('Start a new chat? Current conversation will be saved.')) {
+        threadId = 'thread_' + Date.now();
+        localStorage.setItem('threadId', threadId);
+        messagesContainer.innerHTML = '';
+        addMessage("Hello! I'm your AI assistant. How can I help you today?", false);
+      }
+    }
+
+    // Search chat function
+    function searchChat() {
+      const searchTerm = prompt('Enter search term to find in conversation:');
+      if (!searchTerm) return;
+      
+      const messages = document.querySelectorAll('.message-content');
+      let found = false;
+      
+      messages.forEach(msg => {
+        const text = msg.textContent.toLowerCase();
+        if (text.includes(searchTerm.toLowerCase())) {
+          msg.style.backgroundColor = '#3b82f6';
+          msg.style.transition = 'background-color 0.3s';
+          found = true;
+          setTimeout(() => {
+            msg.style.backgroundColor = '';
+          }, 2000);
+        }
+      });
+      
+      if (!found) {
+        alert('No messages found containing: ' + searchTerm);
+      }
+    }
+
+    // Make functions global
+    window.newChat = newChat;
+    window.searchChat = searchChat;
+
+    // Event listeners
+    input?.addEventListener('keydown', handleEnter);
+    sendBtn?.addEventListener('click', sendMessage);
+
+    // Welcome message
+    addMessage("Hello! I'm your AI assistant. How can I help you today?", false);
+  </script>
+</body>
+</html>
